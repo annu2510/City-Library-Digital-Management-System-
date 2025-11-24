@@ -1,0 +1,489 @@
+import java.io.*;
+import java.util.*;
+
+public class LibraryApp {
+
+    // ---------- Book class ----------
+    static class Book implements Comparable<Book> {
+        private int bookId;
+        private String title;
+        private String author;
+        private String category;
+        private boolean isIssued;
+
+        public Book(int bookId, String title, String author, String category, boolean isIssued) {
+            this.bookId = bookId;
+            this.title = title;
+            this.author = author;
+            this.category = category;
+            this.isIssued = isIssued;
+        }
+
+        public int getBookId() { return bookId; }
+        public String getTitle() { return title; }
+        public String getAuthor() { return author; }
+        public String getCategory() { return category; }
+        public boolean isIssued() { return isIssued; }
+
+        public void markAsIssued() { isIssued = true; }
+        public void markAsReturned() { isIssued = false; }
+
+        public void displayBookDetails() {
+            System.out.printf("ID: %d | Title: %s | Author: %s | Category: %s | Issued: %s%n",
+                    bookId, title, author, category, isIssued ? "Yes" : "No");
+        }
+
+        // Comparable: sort by title (lexicographic, case-insensitive)
+        @Override
+        public int compareTo(Book other) {
+            return this.title.toLowerCase().compareTo(other.title.toLowerCase());
+        }
+
+        // serialization-friendly text representation
+        public String toRecord() {
+            // escape '|' not handled here for simplicity; avoid '|' in data
+            return bookId + "|" + title + "|" + author + "|" + category + "|" + (isIssued ? "1" : "0");
+        }
+
+        public static Book fromRecord(String line) {
+            String[] parts = line.split("\\|", -1);
+            if (parts.length < 5) return null;
+            try {
+                int id = Integer.parseInt(parts[0]);
+                String title = parts[1];
+                String author = parts[2];
+                String category = parts[3];
+                boolean issued = "1".equals(parts[4]);
+                return new Book(id, title, author, category, issued);
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+        }
+    }
+
+    // ---------- Member class ----------
+    static class Member {
+        private int memberId;
+        private String name;
+        private String email;
+        private List<Integer> issuedBooks; // list of book IDs
+
+        public Member(int memberId, String name, String email) {
+            this.memberId = memberId;
+            this.name = name;
+            this.email = email;
+            this.issuedBooks = new ArrayList<>();
+        }
+
+        public int getMemberId() { return memberId; }
+        public String getName() { return name; }
+        public String getEmail() { return email; }
+        public List<Integer> getIssuedBooks() { return issuedBooks; }
+
+        public void addIssuedBook(int bookId) {
+            if (!issuedBooks.contains(bookId)) issuedBooks.add(bookId);
+        }
+
+        public boolean returnIssuedBook(int bookId) {
+            return issuedBooks.remove((Integer) bookId);
+        }
+
+        public void displayMemberDetails() {
+            System.out.printf("ID: %d | Name: %s | Email: %s | IssuedBooks: %s%n",
+                    memberId, name, email, issuedBooks.isEmpty() ? "None" : issuedBooks.toString());
+        }
+
+        public String toRecord() {
+            StringBuilder sb = new StringBuilder();
+            sb.append(memberId).append("|").append(name).append("|").append(email).append("|");
+            for (int i = 0; i < issuedBooks.size(); i++) {
+                if (i > 0) sb.append(",");
+                sb.append(issuedBooks.get(i));
+            }
+            return sb.toString();
+        }
+
+        public static Member fromRecord(String line) {
+            String[] parts = line.split("\\|", -1);
+            if (parts.length < 4) return null;
+            try {
+                int id = Integer.parseInt(parts[0]);
+                String name = parts[1];
+                String email = parts[2];
+                Member m = new Member(id, name, email);
+                if (!parts[3].isEmpty()) {
+                    String[] ids = parts[3].split(",");
+                    for (String s : ids) {
+                        try {
+                            m.addIssuedBook(Integer.parseInt(s.trim()));
+                        } catch (NumberFormatException ignore) {}
+                    }
+                }
+                return m;
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+        }
+    }
+
+    // ---------- LibraryManager ----------
+    static class LibraryManager {
+        private Map<Integer, Book> books = new HashMap<>();
+        private Map<Integer, Member> members = new HashMap<>();
+        private Set<String> categories = new HashSet<>();
+
+        private int nextBookId = 100;   // starting IDs (can be changed)
+        private int nextMemberId = 200;
+
+        private final File booksFile = new File("books.txt");
+        private final File membersFile = new File("members.txt");
+
+        private Scanner scanner;
+
+        LibraryManager(Scanner scanner) {
+            this.scanner = scanner;
+            loadFromFile();
+            // set next IDs based on loaded data
+            if (!books.isEmpty()) {
+                nextBookId = books.keySet().stream().max(Integer::compare).orElse(nextBookId) + 1;
+            }
+            if (!members.isEmpty()) {
+                nextMemberId = members.keySet().stream().max(Integer::compare).orElse(nextMemberId) + 1;
+            }
+        }
+
+        // ---------- File I/O ----------
+        public void loadFromFile() {
+            loadBooks();
+            loadMembers();
+            rebuildCategories();
+        }
+
+        private void loadBooks() {
+            books.clear();
+            if (!booksFile.exists()) return;
+            try (BufferedReader br = new BufferedReader(new FileReader(booksFile))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    Book b = Book.fromRecord(line.trim());
+                    if (b != null) books.put(b.getBookId(), b);
+                }
+            } catch (IOException e) {
+                System.out.println("Error loading books: " + e.getMessage());
+            }
+        }
+
+        private void loadMembers() {
+            members.clear();
+            if (!membersFile.exists()) return;
+            try (BufferedReader br = new BufferedReader(new FileReader(membersFile))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    Member m = Member.fromRecord(line.trim());
+                    if (m != null) members.put(m.getMemberId(), m);
+                }
+            } catch (IOException e) {
+                System.out.println("Error loading members: " + e.getMessage());
+            }
+        }
+
+        private void saveBooks() {
+            try (BufferedWriter bw = new BufferedWriter(new FileWriter(booksFile))) {
+                for (Book b : books.values()) {
+                    bw.write(b.toRecord());
+                    bw.newLine();
+                }
+            } catch (IOException e) {
+                System.out.println("Error saving books: " + e.getMessage());
+            }
+        }
+
+        private void saveMembers() {
+            try (BufferedWriter bw = new BufferedWriter(new FileWriter(membersFile))) {
+                for (Member m : members.values()) {
+                    bw.write(m.toRecord());
+                    bw.newLine();
+                }
+            } catch (IOException e) {
+                System.out.println("Error saving members: " + e.getMessage());
+            }
+        }
+
+        private void rebuildCategories() {
+            categories.clear();
+            for (Book b : books.values()) {
+                if (b.getCategory() != null && !b.getCategory().trim().isEmpty()) {
+                    categories.add(b.getCategory().trim());
+                }
+            }
+        }
+
+        private void persistAll() {
+            saveBooks();
+            saveMembers();
+            rebuildCategories();
+        }
+
+        // ---------- Operations ----------
+        public void addBook() {
+            scanner.nextLine(); // consume leftover newline
+            System.out.print("Enter Book Title: ");
+            String title = scanner.nextLine().trim();
+            System.out.print("Enter Author: ");
+            String author = scanner.nextLine().trim();
+            System.out.print("Enter Category: ");
+            String category = scanner.nextLine().trim();
+
+            if (title.isEmpty() || author.isEmpty() || category.isEmpty()) {
+                System.out.println("All fields required. Aborting add.");
+                return;
+            }
+
+            int id = nextBookId++;
+            Book b = new Book(id, title, author, category, false);
+            books.put(id, b);
+            categories.add(category);
+            persistAll();
+            System.out.println("Book added successfully with ID: " + id);
+        }
+
+        public void addMember() {
+            scanner.nextLine(); // consume newline
+            System.out.print("Enter Member Name: ");
+            String name = scanner.nextLine().trim();
+            System.out.print("Enter Email: ");
+            String email = scanner.nextLine().trim();
+
+            if (name.isEmpty() || email.isEmpty() || !isValidEmail(email)) {
+                System.out.println("Invalid name or email. Aborting add.");
+                return;
+            }
+
+            int id = nextMemberId++;
+            Member m = new Member(id, name, email);
+            members.put(id, m);
+            persistAll();
+            System.out.println("Member added successfully with ID: " + id);
+        }
+
+        private boolean isValidEmail(String email) {
+            // simple basic validation
+            return email.contains("@") && email.contains(".") && !email.contains(" ");
+        }
+
+        public void issueBook() {
+            try {
+                System.out.print("Enter Member ID: ");
+                int mid = scanner.nextInt();
+                Member m = members.get(mid);
+                if (m == null) {
+                    System.out.println("Member not found.");
+                    return;
+                }
+                System.out.print("Enter Book ID to issue: ");
+                int bid = scanner.nextInt();
+                Book b = books.get(bid);
+                if (b == null) {
+                    System.out.println("Book not found.");
+                    return;
+                }
+                if (b.isIssued()) {
+                    System.out.println("Book is already issued.");
+                    return;
+                }
+                // issue
+                b.markAsIssued();
+                m.addIssuedBook(bid);
+                persistAll();
+                System.out.println("Book " + bid + " issued to member " + mid + " successfully.");
+            } catch (InputMismatchException ime) {
+                scanner.nextLine(); // clear buffer
+                System.out.println("Invalid input. Please enter numeric IDs.");
+            }
+        }
+
+        public void returnBook() {
+            try {
+                System.out.print("Enter Member ID: ");
+                int mid = scanner.nextInt();
+                Member m = members.get(mid);
+                if (m == null) {
+                    System.out.println("Member not found.");
+                    return;
+                }
+                System.out.print("Enter Book ID to return: ");
+                int bid = scanner.nextInt();
+                Book b = books.get(bid);
+                if (b == null) {
+                    System.out.println("Book not found.");
+                    return;
+                }
+                if (!b.isIssued()) {
+                    System.out.println("This book is not currently issued.");
+                    return;
+                }
+                boolean removed = m.returnIssuedBook(bid);
+                if (!removed) {
+                    System.out.println("This member does not have this book issued.");
+                    return;
+                }
+                b.markAsReturned();
+                persistAll();
+                System.out.println("Book " + bid + " returned by member " + mid + " successfully.");
+            } catch (InputMismatchException ime) {
+                scanner.nextLine();
+                System.out.println("Invalid input. Please enter numeric IDs.");
+            }
+        }
+
+        // search by title/author/category (case-insensitive, substring match)
+        public void searchBooks() {
+            scanner.nextLine(); // clear newline
+            System.out.print("Search by (1) Title (2) Author (3) Category : ");
+            String choice = scanner.nextLine().trim();
+            System.out.print("Enter search text: ");
+            String q = scanner.nextLine().trim().toLowerCase();
+            if (q.isEmpty()) {
+                System.out.println("Empty search text. Aborting.");
+                return;
+            }
+            List<Book> results = new ArrayList<>();
+            switch (choice) {
+                case "1":
+                    for (Book b : books.values()) {
+                        if (b.getTitle().toLowerCase().contains(q)) results.add(b);
+                    }
+                    break;
+                case "2":
+                    for (Book b : books.values()) {
+                        if (b.getAuthor().toLowerCase().contains(q)) results.add(b);
+                    }
+                    break;
+                case "3":
+                    for (Book b : books.values()) {
+                        if (b.getCategory().toLowerCase().contains(q)) results.add(b);
+                    }
+                    break;
+                default:
+                    System.out.println("Invalid option.");
+                    return;
+            }
+            if (results.isEmpty()) {
+                System.out.println("No books matched your search.");
+            } else {
+                System.out.println("Search results:");
+                for (Book b : results) b.displayBookDetails();
+            }
+        }
+
+        // sort options
+        public void sortBooks() {
+            System.out.println("Sort by: 1) Title (default) 2) Author 3) Category");
+            System.out.print("Enter choice: ");
+            String choice = scanner.next().trim();
+            List<Book> list = new ArrayList<>(books.values());
+            switch (choice) {
+                case "2":
+                    list.sort(Comparator.comparing(b -> b.getAuthor().toLowerCase()));
+                    break;
+                case "3":
+                    list.sort(Comparator.comparing(b -> b.getCategory().toLowerCase()));
+                    break;
+                default:
+                    Collections.sort(list); // Comparable -> title
+            }
+            System.out.println("Sorted books:");
+            for (Book b : list) b.displayBookDetails();
+        }
+
+        public void displayAllBooks() {
+            if (books.isEmpty()) {
+                System.out.println("No books available.");
+                return;
+            }
+            System.out.println("All books:");
+            for (Book b : books.values()) b.displayBookDetails();
+        }
+
+        public void displayAllMembers() {
+            if (members.isEmpty()) {
+                System.out.println("No members available.");
+                return;
+            }
+            System.out.println("All members:");
+            for (Member m : members.values()) m.displayMemberDetails();
+        }
+
+        public void displayCategories() {
+            if (categories.isEmpty()) {
+                System.out.println("No categories yet.");
+                return;
+            }
+            System.out.println("Categories:");
+            for (String c : categories) System.out.println("- " + c);
+        }
+
+        // manual save (exposed)
+        public void saveNow() {
+            persistAll();
+            System.out.println("Data saved to files.");
+        }
+
+        // helper: find book by title exact (used rarely)
+        public Book findBookByExactTitle(String title) {
+            for (Book b : books.values()) {
+                if (b.getTitle().equalsIgnoreCase(title)) return b;
+            }
+            return null;
+        }
+    }
+
+    // ---------- Application entry & menu ----------
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        LibraryManager manager = new LibraryManager(scanner);
+
+        boolean running = true;
+        while (running) {
+            System.out.println();
+            System.out.println("=== City Library Digital Management System ===");
+            System.out.println("1. Add Book");
+            System.out.println("2. Add Member");
+            System.out.println("3. Issue Book");
+            System.out.println("4. Return Book");
+            System.out.println("5. Search Books");
+            System.out.println("6. Sort Books");
+            System.out.println("7. Display All Books");
+            System.out.println("8. Display All Members");
+            System.out.println("9. Display Categories");
+            System.out.println("10. Save Now");
+            System.out.println("11. Exit");
+            System.out.print("Enter your choice: ");
+
+            String choice = scanner.next().trim();
+            switch (choice) {
+                case "1": manager.addBook(); break;
+                case "2": manager.addMember(); break;
+                case "3": manager.issueBook(); break;
+                case "4": manager.returnBook(); break;
+                case "5": manager.searchBooks(); break;
+                case "6": manager.sortBooks(); break;
+                case "7": manager.displayAllBooks(); break;
+                case "8": manager.displayAllMembers(); break;
+                case "9": manager.displayCategories(); break;
+                case "10": manager.saveNow(); break;
+                case "11":
+                    System.out.println("Exiting. Saving data...");
+                    manager.saveNow();
+                    running = false;
+                    break;
+                default:
+                    System.out.println("Invalid choice. Try again.");
+            }
+        }
+
+        // close shared scanner
+        scanner.close();
+        System.out.println("Program terminated.");
+    }
+}
